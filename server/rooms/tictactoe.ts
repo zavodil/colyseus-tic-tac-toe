@@ -17,7 +17,8 @@ export class TicTacToe extends Room<State> {
   randomMoveTimeout: Delayed;
 
   onCreate () {
-    this.setState(new State())
+    this.setState(new State());
+    this.onMessage("action", (client, message) => this.playerAction(client, message));
   }
 
   onJoin (client: Client) {
@@ -32,7 +33,7 @@ export class TicTacToe extends Room<State> {
     }
   }
 
-  onMessage (client: Client, data: any) {
+  playerAction (client: Client, data: any) {
     if (this.state.winner || this.state.draw) {
       return false;
     }
@@ -85,7 +86,7 @@ export class TicTacToe extends Room<State> {
       for (let y=0; y<BOARD_WIDTH; y++) {
         const index = x + BOARD_WIDTH * y;
         if (this.state.board[index] === 0) {
-          this.onMessage({ sessionId } as Client, { x, y });
+          this.playerAction({ sessionId } as Client, { x, y });
           return;
         }
       }

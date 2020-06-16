@@ -121,7 +121,7 @@ export default class GameScreen extends PIXI.Container {
   }
 
   onSelect (x, y) {
-    this.room.send({x: x, y: y})
+    this.room.send("action", { x: x, y: y })
   }
 
   nextTurn (playerId) {
