@@ -6,7 +6,7 @@ const BOARD_WIDTH = 3;
 
 class State extends Schema {
   @type("string") currentTurn: string;
-  @type({ map: "string" }) players = new MapSchema<boolean>();
+  @type({ map: "boolean" }) players = new MapSchema<boolean>();
   @type(["number"]) board: number[] = new ArraySchema<number>(0, 0, 0, 0, 0, 0, 0, 0, 0);
   @type("string") winner: string;
   @type("boolean") draw: boolean;
@@ -22,9 +22,9 @@ export class TicTacToe extends Room<State> {
   }
 
   onJoin (client: Client) {
-    this.state.players[client.sessionId] = client.sessionId;
+    this.state.players.set(client.sessionId, true);
 
-    if (Object.keys(this.state.players).length === 2) {
+    if (this.state.players.size === 2) {
       this.state.currentTurn = client.sessionId;
       this.setAutoMoveTimeout();
 
@@ -39,7 +39,7 @@ export class TicTacToe extends Room<State> {
     }
 
     if (client.sessionId === this.state.currentTurn) {
-      const playerIds = Object.keys(this.state.players);
+      const playerIds = Array.from(this.state.players.keys());
 
       const index = data.x + BOARD_WIDTH * data.y;
 
@@ -140,11 +140,13 @@ export class TicTacToe extends Room<State> {
   }
 
   onLeave (client) {
-    delete this.state.players[ client.sessionId ];
+    this.state.players.delete(client.sessionId);
 
-    if (this.randomMoveTimeout) this.randomMoveTimeout.clear()
+    if (this.randomMoveTimeout) {
+      this.randomMoveTimeout.clear()
+    }
 
-    let remainingPlayerIds = Object.keys(this.state.players)
+    let remainingPlayerIds = Array.from(this.state.players.keys());
     if (remainingPlayerIds.length > 0) {
       this.state.winner = remainingPlayerIds[0]
     }

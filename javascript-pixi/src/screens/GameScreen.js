@@ -50,20 +50,16 @@ export default class GameScreen extends PIXI.Container {
       this.board.set(x, y, value);
     }
 
+    this.room.state.listen("currentTurn", (sessionId) => {
+      // go to next turn after a little delay, to ensure "onJoin" gets called before this.
+      setTimeout(() => this.nextTurn(sessionId), 10);
+    });
+
+    this.room.state.listen("draw", () => this.drawGame());
+    this.room.state.listen("winner", (sessionId) => this.showWinner(sessionId));
+
     this.room.state.onChange = (changes) => {
-      changes.forEach(change => {
-        if (change.field === "currentTurn") {
-          // go to next turn after a little delay, to ensure "onJoin" gets called before this.
-          setTimeout(() => this.nextTurn(change.value), 10)
-
-        } else if (change.field === "draw") {
-          this.drawGame();
-
-        } else if (change.field === "winner") {
-          this.showWinner(change.value);
-
-        }
-      });
+      console.log("state.onChange =>", changes);
     }
 
     this.room.onError.once(() => this.emit('goto', TitleScreen));
@@ -171,10 +167,10 @@ export default class GameScreen extends PIXI.Container {
     this.emit('goto', EndGameScreen, { draw: true })
   }
 
-  showWinner (clientId) {
+  showWinner (sessionId) {
     this.room.leave()
     this.emit('goto', EndGameScreen, {
-      won: (this.room.sessionId == clientId)
+      won: (this.room.sessionId == sessionId)
     })
   }
 
