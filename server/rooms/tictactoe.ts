@@ -147,7 +147,7 @@ export class TicTacToe extends Room<State> {
     }
 
     let remainingPlayerIds = Array.from(this.state.players.keys());
-    if (remainingPlayerIds.length > 0) {
+    if (!this.state.winner && !this.state.draw && remainingPlayerIds.length > 0) {
       this.state.winner = remainingPlayerIds[0]
     }
   }
