@@ -1,96 +1,97 @@
-import { Room, Delayed, Client } from 'colyseus';
-import { type, Schema, MapSchema, ArraySchema } from '@colyseus/schema';
+import {NearContract, NearBindgen, call, view, near} from 'near-sdk-js'
 
-const TURN_TIMEOUT = 10
+const TURN_TIMEOUT = 100;
 const BOARD_WIDTH = 3;
 
-class State extends Schema {
-  @type("string") currentTurn: string;
-  @type({ map: "boolean" }) players = new MapSchema<boolean>();
-  @type(["number"]) board: number[] = new ArraySchema<number>(0, 0, 0, 0, 0, 0, 0, 0, 0);
-  @type("string") winner: string;
-  @type("boolean") draw: boolean;
+class State {
+  constructor() {
+    this.currentTurn = "";
+    this.players = Array(2);
+    this.board = Array(BOARD_WIDTH * BOARD_WIDTH);
+    this.winner = "";
+    this.draw = false;
+    this.moveTimeout = 0;
+  }
 }
 
-export class TicTacToe extends Room<State> {
-  maxClients = 2;
-  randomMoveTimeout: Delayed;
-
-  onCreate () {
-    this.setState(new State());
-    this.onMessage("action", (client, message) => this.playerAction(client, message));
+@NearBindgen
+class TicTacToe extends NearContract {
+  constructor() {
+    super()
+    this.state = new State();
+    this.locked = false;
   }
 
-  onJoin (client: Client) {
-    this.state.players.set(client.sessionId, true);
+  @call
+  onCreate () {
+    this.state = new State();
+  }
 
-    if (this.state.players.size === 2) {
-      this.state.currentTurn = client.sessionId;
-      this.setAutoMoveTimeout();
+  @call
+  onJoin () {
+    assert(!this.locked, "Game Locked");
+    let account_id = near.predecessorAccountId();
+
+    if (!this.state.players[0] && !this.state.players[1]) {
+      this.state = new State();
+    }
+
+    if (!this.state.players[0]) {
+      this.state.players[0] = account_id;
+    }
+    else if (!this.state.players[1]) {
+      this.state.players[1] = account_id;
+      this.state.currentTurn = this.state.players[0];
 
       // lock this room for new users
-      this.lock();
+      this.locked = true;
+      this.setMoveTimeout();
     }
   }
 
-  playerAction (client: Client, data: any) {
-    if (this.state.winner || this.state.draw) {
-      return false;
-    }
+  @call
+  playerAction ({data}) {
+    assert (!(this.state.winner || this.state.draw), "Already finished");
 
-    if (client.sessionId === this.state.currentTurn) {
-      const playerIds = Array.from(this.state.players.keys());
+    let account_id = near.signerAccountId()
+    assert(this.state.currentTurn === account_id, "Not your turn");
 
-      const index = data.x + BOARD_WIDTH * data.y;
+    const playerIds = this.state.players;
 
-      if (this.state.board[index] === 0) {
-        const move = (client.sessionId === playerIds[0]) ? 1 : 2;
-        this.state.board[index] = move;
+    const index = data.x + BOARD_WIDTH * data.y;
 
-        if (this.checkWin(data.x, data.y, move)) {
-          this.state.winner = client.sessionId;
+    assert(this.state.board[index] === null, "Field already assigned");
 
-        } else if (this.checkBoardComplete()) {
-          this.state.draw = true;
+    const move = (account_id === playerIds[0]) ? 1 : 2;
+    this.state.board[index] = move;
 
-        } else {
-          // switch turn
-          const otherPlayerSessionId = (client.sessionId === playerIds[0]) ? playerIds[1] : playerIds[0];
+    if (this.checkWin(data.x, data.y, move)) {
+      this.state.winner = account_id;
+      this.locked = false;
+      this.state.players = Array(2);
 
-          this.state.currentTurn = otherPlayerSessionId;
+    } else if (this.checkBoardComplete()) {
+      this.state.draw = true;
+      this.locked = false;
+      this.state.players = Array(2);
+    } else {
+      // switch turn
+      const otherPlayerId = (account_id === playerIds[0]) ? playerIds[1] : playerIds[0];
 
-          this.setAutoMoveTimeout();
-        }
+      this.state.currentTurn = otherPlayerId;
 
-      }
+      this.setMoveTimeout();
     }
   }
 
-  setAutoMoveTimeout() {
-    if (this.randomMoveTimeout) {
-      this.randomMoveTimeout.clear();
-    }
-
-    this.randomMoveTimeout = this.clock.setTimeout(() => this.doRandomMove(), TURN_TIMEOUT * 1000);
+  setMoveTimeout () {
+    this.state.moveTimeout = (near.blockTimestamp()  + BigInt(TURN_TIMEOUT) * BigInt(1_000_000_000)).toString();
   }
 
   checkBoardComplete () {
     return this.state.board
-      .filter(item => item === 0)
-      .length === 0;
-  }
-
-  doRandomMove () {
-    const sessionId = this.state.currentTurn;
-    for (let x=0; x<BOARD_WIDTH; x++) {
-      for (let y=0; y<BOARD_WIDTH; y++) {
-        const index = x + BOARD_WIDTH * y;
-        if (this.state.board[index] === 0) {
-          this.playerAction({ sessionId } as Client, { x, y });
-          return;
-        }
-      }
-    }
+        .filter(item => item === null)
+        .length === 0;
   }
 
   checkWin (x, y, move) {
@@ -139,18 +140,23 @@ export class TicTacToe extends Room<State> {
     return won;
   }
 
-  onLeave (client) {
-    this.state.players.delete(client.sessionId);
-
-    if (this.randomMoveTimeout) {
-      this.randomMoveTimeout.clear()
-    }
-
-    let remainingPlayerIds = Array.from(this.state.players.keys());
-    if (!this.state.winner && !this.state.draw && remainingPlayerIds.length > 0) {
-      this.state.winner = remainingPlayerIds[0]
-    }
+  @call
+  onTimeoutEnds () {
+    assert(near.blockTimestamp() > BigInt(this.state.moveTimeout), "Too early");
+    this.locked = false;
+    this.onCreate({});
   }
 
+  @view
+  get_game () {
+    return [this.state.board, this.state.players, this.state.currentTurn, this.state.moveTimeout, this.locked, this.state.winner, this.state.draw];
+  }
 }
 
+function assert(b, str) {
+  if (b) {
+    return
+  } else {
+    throw Error("assertion failed: " + str)
+  }
+}
