@@ -1,9 +1,11 @@
 import * as PIXI from 'pixi.js'
 
 import Application from '../Application'
-import GameScreen from './GameScreen'
+import TitleScreen from './TitleScreen'
 
 import LocalStorage from '../core/LocalStorage'
+import {callJsvm} from "../near";
+import * as nearAPI from "near-api-js";
 
 export default class EndGameScreen extends PIXI.Container {
 
@@ -37,7 +39,7 @@ export default class EndGameScreen extends PIXI.Container {
     this.title.pivot.x = this.title.width / 2
     this.addChild(this.title)
 
-    this.instructionText = new PIXI.Text("touch to play again", {
+    this.instructionText = new PIXI.Text("Click to play again", {
       font: "52px JennaSue",
       fill: 0x000,
       textAlign: 'center'
@@ -58,6 +60,7 @@ export default class EndGameScreen extends PIXI.Container {
 
     this.colyseus = new PIXI.Sprite.fromImage('images/colyseus.png')
     this.colyseus.pivot.x = this.colyseus.width / 2
+    this.colyseus.alpha = 0.6
     this.addChild(this.colyseus)
 
     this.interactive = true
@@ -87,7 +90,11 @@ export default class EndGameScreen extends PIXI.Container {
   }
 
   startGame () {
-    this.emit('goto', GameScreen)
+    callJsvm("onJoin", "" , nearAPI.utils.format.parseNearAmount("0.01"))
+        .then(game => {
+          console.log(game)
+          this.emit('goto', TitleScreen)
+        });
   }
 
   onResize () {
@@ -103,7 +110,7 @@ export default class EndGameScreen extends PIXI.Container {
     this.statusesText.y = this.instructionText.y + this.instructionText.height + 10
 
     this.colyseus.x = Application.WIDTH / 2
-    this.colyseus.y = Application.HEIGHT - this.colyseus.height - this.MARGIN
+    this.colyseus.y = Application.HEIGHT - this.colyseus.height - this.MARGIN / 3
   }
 
   onDispose () {

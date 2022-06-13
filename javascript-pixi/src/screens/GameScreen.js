@@ -1,21 +1,17 @@
 import * as PIXI from 'pixi.js'
 
 import Application from '../Application'
-import TitleScreen from './TitleScreen'
 import EndGameScreen from './EndGameScreen'
 
 import Board from '../components/Board'
+import {callJsvm, viewJsvm} from '../near'
 
 export default class GameScreen extends PIXI.Container {
 
   constructor () {
     super()
 
-    let text = (colyseus.readyState === WebSocket.CLOSED)
-      ? "Couldn't connect."
-      : "Waiting for an opponent..."
-
-    this.waitingText = new PIXI.Text(text, {
+    this.waitingText = new PIXI.Text("Loading...", {
       font: "100px JennaSue",
       fill: '#000',
       textAlign: 'center'
@@ -26,43 +22,84 @@ export default class GameScreen extends PIXI.Container {
 
     this.on('dispose', this.onDispose.bind(this))
 
+    this.playerValue = 0;
+    this.turnsCounter = -1;
+    this.currentTurn = "";
     this.board = new Board()
-    this.connect();
+
+
+    this.checkSignIn()
+        .then(() => {
+
+        });
 
     this.onResize()
   }
 
-  async connect () {
-    this.room = await colyseus.joinOrCreate('tictactoe');
 
-    let numPlayers = 0;
-    this.room.state.players.onAdd = () => {
-      numPlayers++;
+  async checkSignIn() {
+    if (window.wallet.isSignedIn()) {
+      this.userAccountId = window.wallet.getAccountId();
+      this.nearAccount = new PIXI.Text(this.userAccountId, {
+        font: "36px JennaSue",
+        fill: 0x000,
+        textAlign: 'center'
+      });
+      this.nearAccount.x = Application.WIDTH -  this.nearAccount.width - Application.MARGIN / 2;
+      this.nearAccount.y = Application.MARGIN / 2;
+      this.addChild(this.nearAccount)
 
-      if (numPlayers === 2) {
-        this.onJoin();
+      this.connect();
+    }
+  }
+
+  drawFigure(value, index) {
+    const x = index % 3;
+    const y = Math.floor(index / 3);
+    this.board.set(x, y, value);
+  }
+
+  getGame() {
+    return viewJsvm( "get_game", "").then(game => {
+      let locked = game[4];
+      const winner = game[5];
+      const draw = game[6];
+
+      if(winner || draw){
+        clearInterval(this.gameTimeout);
+
+        if(winner)
+          this.showWinner(winner);
+        if(draw)
+          this.drawGame(winner);
       }
-    }
 
-    this.room.state.board.onChange = (value, index) => {
-      const x = index % 3;
-      const y = Math.floor(index / 3);
-      this.board.set(x, y, value);
-    }
-
-    this.room.state.listen("currentTurn", (sessionId) => {
-      // go to next turn after a little delay, to ensure "onJoin" gets called before this.
-      setTimeout(() => this.nextTurn(sessionId), 10);
+      else {
+        if (game[1].includes(this.userAccountId) || !locked) {
+          const turns = game[0].filter(value => value !== null).length;
+          if (turns > this.turnsCounter && turns < 9) {
+            console.log(game)
+            this.turnsCounter = turns;
+            this.playerValue = game[1][0] === this.userAccountId ? 1 : 2;
+            game[0].map((value, index) => this.drawFigure(value, index));
+            this.currentTurn = game[2];
+            this.nextTurn(this.currentTurn);
+          }
+        } else {
+          //this.emit('goto', TitleScreen)
+        }
+      }
     });
+  }
 
-    this.room.state.listen("draw", () => this.drawGame());
-    this.room.state.listen("winner", (sessionId) => this.showWinner(sessionId));
+  async connect () {
+    this.getGame()
 
-    this.room.state.onChange = (changes) => {
-      console.log("state.onChange =>", changes);
-    }
+    this.gameTimeout = setInterval(() => {
+      this.getGame()
+    }, 1000);
 
-    this.room.onError.once(() => this.emit('goto', TitleScreen));
+    this.onJoin();
   }
 
   transitionIn () {
@@ -90,8 +127,8 @@ export default class GameScreen extends PIXI.Container {
     this.timeIcon.pivot.x = this.timeIcon.width / 2
     this.addChild(this.timeIcon)
 
-    this.timeRemaining = new PIXI.Text("10", {
-      font: "100px JennaSue",
+    this.timeRemaining = new PIXI.Text("99", {
+      font: "60px JennaSue",
       fill: 0x000000,
       textAlign: 'center'
     })
@@ -109,6 +146,7 @@ export default class GameScreen extends PIXI.Container {
       textAlign: 'center'
     })
     this.statusText.pivot.y = this.statusText.height / 2
+    this.statusText.visible = false;
     this.addChild(this.statusText)
 
     this.countdownInterval = clock.setInterval(this.turnCountdown.bind(this), 1000)
@@ -117,7 +155,17 @@ export default class GameScreen extends PIXI.Container {
   }
 
   onSelect (x, y) {
-    this.room.send("action", { x: x, y: y })
+    if(this.userAccountId && this.playerValue && this.userAccountId === this.currentTurn) {
+      this.nextTurn("");
+      this.turnsCounter++;
+      this.board.set(x, y, this.playerValue);
+      callJsvm("playerAction", JSON.stringify({data: { x: x, y: y }})).then(game => {
+        console.log(game)
+      }).catch((error) => {
+        console.log("error");
+        window.location.reload();
+      });
+    }
   }
 
   nextTurn (playerId) {
@@ -126,7 +174,7 @@ export default class GameScreen extends PIXI.Container {
       alpha: 0
     }, 200, Tweener.ease.quintOut).then(() => {
 
-      if (playerId == this.room.sessionId) {
+      if (playerId == this.userAccountId) {
         this.statusText.text = "Your move!"
 
       } else {
@@ -134,6 +182,7 @@ export default class GameScreen extends PIXI.Container {
       }
 
       this.statusText.x = Application.WIDTH / 2 - this.statusText.width / 2
+      this.statusText.visible = true;
 
       tweener.add(this.statusText).to({
         y: Application.HEIGHT - Application.MARGIN,
@@ -143,7 +192,7 @@ export default class GameScreen extends PIXI.Container {
     })
 
     this.timeRemaining.style.fill = '#000000';
-    this.timeRemaining.text = "10"
+    this.timeRemaining.text = "100"
     this.countdownInterval.reset()
   }
 
@@ -163,14 +212,12 @@ export default class GameScreen extends PIXI.Container {
   }
 
   drawGame () {
-    this.room.leave()
     this.emit('goto', EndGameScreen, { draw: true })
   }
 
-  showWinner (sessionId) {
-    this.room.leave()
+  showWinner (playerId) {
     this.emit('goto', EndGameScreen, {
-      won: (this.room.sessionId == sessionId)
+      won: (this.userAccountId == playerId)
     })
   }
 
@@ -184,8 +231,8 @@ export default class GameScreen extends PIXI.Container {
       this.timeIcon.x = Application.WIDTH / 2 - this.timeIcon.pivot.x
       this.timeIcon.y = margin
 
-      this.timeRemaining.x = Application.WIDTH / 2 + this.timeIcon.pivot.x + 20
-      this.timeRemaining.y = margin - 20
+      this.timeRemaining.x = Application.WIDTH / 2 + this.timeIcon.pivot.x
+      this.timeRemaining.y = margin
 
       this.board.x = Application.WIDTH / 2
       this.board.y = Application.HEIGHT / 2

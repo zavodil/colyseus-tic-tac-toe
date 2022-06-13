@@ -10,6 +10,7 @@
   "dependencies": {
     "css-loader": "^0.28.11",
     "json-loader": "^0.5.7",
+    "near-api-js": "^0.45.1",
     "style-loader": "^0.20.3",
     "webpack": "^4.5.0",
     "webpack-cli": "^2.0.14",
